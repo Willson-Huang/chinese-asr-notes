@@ -104,8 +104,8 @@ python tools/funasr_adapter.py --audio <音频文件> --out out.json
 | `initial_prompt` 注入专名提示 | `宁德时代` 出现 23→36 次有效，但人名**零救回**（声学层错误，提示词只在解码先验层起作用） | 关闭 |
 | `BatchedInferencePipeline` 提速 | 快 2.05x，但凭空多出幻觉文本（"请不吝点赞 订阅 转发 打赏支持…"），错别字明显增多 | 关闭 |
 | 调 Nano 参数量提速 | `batch_size` / VAD 段长 / 砍热词 / 开双进程 **四组全部零收益**；且 `batch_size>1` 引入解码非确定性 | 关闭 |
-| vLLM 提速（Windows） | 官方部署矩阵面向 Linux GPU 服务端；官方公布的 RTFx 是高端数据中心卡上的数值 | Windows 原生不可行 |
-| llama.cpp GGUF 加速 Nano | 官方 Windows 预编译包**只含 SenseVoiceSmall** 二进制；CUDA 包面向 arch 86，sm_89 一代不在覆盖内 | 要 GPU 必须自编译 |
+| vLLM 提速（Windows） | 官方部署矩阵面向 Linux GPU 服务端；官方公布的 RTFx 340 是 **H100** 上的数值（与 4060 Ti 不可比） | Windows 原生不可行 |
+| llama.cpp GGUF 加速 Nano | 官方 Windows 预编译包**只含 SenseVoiceSmall** 二进制；CUDA 包面向 arch 86（RTX 30 系），本机 NVIDIA RTX 4060 Ti 8GB 的 sm_89 不在覆盖内 | 要 GPU 必须自编译 |
 
 完整数据、样本与复现命令见 [docs/已否决的路线.md](docs/已否决的路线.md)。
 
@@ -131,7 +131,7 @@ python tools/funasr_adapter.py --audio <音频文件> --out out.json
 ## 适用边界
 
 - 结论来自**中文口播**场景（播客、访谈、解说、会议）。英文 / 多语种场景的引擎取舍可能不同
-- 速度数据来自**消费级 NVIDIA GPU（8 GB 显存）**。CPU 回退约为 GPU 的 1/6
+- 速度数据来自 **NVIDIA RTX 4060 Ti 8GB**。CPU 回退约为 GPU 的 1/6
 - 「已否决的路线」均有明确的适用边界（Windows 原生 / 官方预编译产物 / 跨主题），**不要外推成普适结论**
 - 拒绝对话内容的法律与伦理判断一律不谈：转写他人音频请遵守当地法律与平台条款
 

@@ -42,7 +42,7 @@ sys.stderr.reconfigure(encoding='utf-8')
 MODEL_ID = 'FunAudioLLM/Fun-ASR-Nano-2512'
 DEFAULT_MAX_HOTWORDS = 80
 # VAD 分段并发解码数。默认 1 —— 保留已知良好行为。
-# 实测（NVIDIA GPU 8GB，180s 与 24:43 全长音频）：1/4/8/16 的实时倍率
+# 实测（NVIDIA RTX 4060 Ti 8GB，180s 与 24:43 全长音频）：1/4/8/16 的实时倍率
 # 分别是 5.07/5.01/5.06/5.04x，**并发解码对本卡零收益**（GPU 由单进程即吃满，
 # 双进程并发实测加速比仅 1.04x）。且 batch=4/8 时个别词与 batch=1 不一致（解码
 # 非确定性），batch=16 才完全一致——用参数换不来速度却可能换掉稳定性，故默认 1。
