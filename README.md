@@ -2,8 +2,8 @@
 
 **中文音频转文字的实战笔记与工具链** —— 引擎怎么选、专名为什么错、哪些自动化路线已经用真实数据否决掉了。
 
-> Chinese ASR field notes: which engine to pick, why proper nouns come out wrong, and which "automated correction" ideas have already been ruled out with hard numbers.
-> **不通用于任何单一平台**：播客、会议录音、课程录像、访谈、B站视频，处理逻辑是同一套。
+> Chinese ASR field notes: which engine to pick, why proper nouns come out wrong, and which "automated correction" ideas have already been ruled out with hard numbers. Platform-agnostic — works with any Chinese audio: podcasts, meetings, lectures, interviews, or Bilibili videos.
+> **与平台无关**：播客、会议录音、课程录像、访谈、B站视频，处理逻辑是同一套——不做 B站 也能直接用。
 
 ---
 
