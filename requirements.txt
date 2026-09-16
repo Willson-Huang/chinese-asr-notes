@@ -1,0 +1,25 @@
+# chinese-asr-notes 依赖说明
+#
+# 注意：tools/ 下 4 个脚本（verify_pack / verify_structure / verify_coverage / check_glossary）
+# 零第三方依赖，克隆下来即可运行，不需要本文件。
+
+# ---- 错误统计的音系维度（缺失会自动降级，其余维度照常产出）----
+pypinyin>=0.55.0
+
+# ---- ASR 引擎（按需选装；两者依赖冲突，不要装进同一个环境）----
+# whisper 引擎
+faster-whisper>=1.0.0
+
+# Fun-ASR-Nano 引擎（供 tools/funasr_adapter.py 使用）
+#   与 faster-whisper 依赖冲突，请单独建 venv：
+#     python -m venv ~/.venvs/asr-nano
+#     ~/.venvs/asr-nano/bin/pip install --no-deps funasr
+#     ~/.venvs/asr-nano/bin/pip install numpy imageio-ffmpeg
+# funasr
+
+# ---- 音频读取（funasr_adapter 需要）----
+imageio-ffmpeg>=0.4.9
+
+# ---- 可选：NVIDIA GPU 加速（按你的 CUDA 版本选装；不装自动回退 CPU）----
+# nvidia-cublas-cu12
+# nvidia-cudnn-cu12
