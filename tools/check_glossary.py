@@ -8,17 +8,26 @@
     # 只报告，不改动（默认）
     python check_glossary.py --dir <RAW_DIR>
 
-    # 自动替换（仅替换语境限定为 ALL 的条目；其余需 --force 并人工确认语境）
+    # 自动替换：默认只替换语境限定为 ALL 的条目
     python check_glossary.py --dir <目录> --fix
-    python check_glossary.py --dir <目录> --fix --force
+
+    # 额外替换点名的「需判语境」条目（写错误写法，逗号分隔）
+    python check_glossary.py --dir <目录> --fix --force 耳塞,皮肤定律
+
+    # 替换全部条目（旧版 --force 的行为，会改坏正文，必须显式写出）
+    python check_glossary.py --dir <目录> --fix --force-all
 
     # 单文件
     python check_glossary.py --file <路径>
 
+逐行豁免：行内出现 glossary:ignore 即跳过该行（用于「本义出现」这类永久误报）。
+替换是就地改写用户原文，所以每次改写前会留一份同名 .bak。
+
 退出码：0 = 无命中；1 = 有命中；2 = 参数/读取错误
 """
 import argparse
-import re
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -55,19 +64,36 @@ def is_glossary_table_row(line, wrong, right):
     return wrong in line and right in line
 
 
-def scan_file(path, rows, fix=False, force=False):
+def _backup_and_write(path, text):
+    """替换前留一份 .bak，写入走同目录临时文件加替换。
+
+    这个脚本是就地改写用户原文的，误替换不可逆，所以必须先留退路。
+    """
+    p = Path(path)
+    if p.exists():
+        shutil.copy2(p, p.with_name(p.name + '.bak'))
+    tmp = p.with_name(p.name + '.tmp')
+    tmp.write_text(text, encoding='utf-8')
+    os.replace(tmp, p)
+
+
+def scan_file(path, rows, fix=False, force=(), force_all=False):
     text = Path(path).read_text(encoding='utf-8')
     lines = text.splitlines(keepends=True)  # 保留行尾换行符，replace 不会丢
     hits = []
     changed = False
+    allow = {t.strip() for t in force if t.strip()}
     for i, line in enumerate(lines):
+        if 'glossary:ignore' in line:
+            continue                      # 逐行豁免：本义出现、引用订正记录等
         for wrong, right, note, unconditional in rows:
             if wrong not in line:
                 continue
             if is_glossary_table_row(line, wrong, right):
                 continue
             action = '未替换'
-            if fix and (unconditional or force):
+            # 只替换 ALL、点名的条目，或 --force-all 下的全部条目
+            if fix and (unconditional or force_all or wrong in allow):
                 lines[i] = lines[i].replace(wrong, right)
                 action = '已替换'
                 changed = True
@@ -77,7 +103,7 @@ def scan_file(path, rows, fix=False, force=False):
                 'text': line.strip()[:120],
             })
     if changed:
-        Path(path).write_text(''.join(lines), encoding='utf-8')
+        _backup_and_write(path, ''.join(lines))
     return hits, changed
 
 
@@ -87,7 +113,7 @@ def iter_md(target):
         yield p
         return
     # SKIP_PARTS 只用于过滤「根目录之下新出现的」scripts/ references/ 等（2026-09-16 修正）。
-    # 历史行为：显式指定的根若命中 SKIP_PARTS（例如归档目录位于隐藏工作目录之下），整个目录被静默
+    # 历史行为：显式指定的根若命中 SKIP_PARTS（如目标位于隐藏工作目录之下），整个目录被静默
     # 跳过并报「未发现命中」——假阴性会被误读成「没有错」。现在改为显式提醒后照常扫描。
     root_skipped = SKIP_PARTS & set(p.parts)
     if root_skipped:
@@ -105,7 +131,10 @@ def main():
     ap.add_argument('--file', default='', help='扫描单个文件')
     ap.add_argument('--glossary', default=str(DEFAULT_GLOSSARY))
     ap.add_argument('--fix', action='store_true', help='自动替换（默认只替换 ALL 语境条目）')
-    ap.add_argument('--force', action='store_true', help='配合 --fix，连需人工判断语境的条目也替换')
+    ap.add_argument('--force', default='', metavar='TERM[,TERM...]',
+                    help='配合 --fix：额外替换点名的「需判语境」条目（写错误写法，逗号分隔）')
+    ap.add_argument('--force-all', action='store_true',
+                    help='配合 --fix：替换全部条目（旧版 --force 的行为，会改坏正文）')
     a = ap.parse_args()
 
     if not a.dir and not a.file:
@@ -123,7 +152,8 @@ def main():
     total_hits = 0
     total_files = 0
     for f in iter_md(a.dir or a.file):
-        hits, changed = scan_file(f, rows, a.fix, a.force)
+        hits, changed = scan_file(f, rows, a.fix,
+                                  (a.force or '').split(','), a.force_all)
         if not hits:
             continue
         total_files += 1
@@ -141,7 +171,8 @@ def main():
         return 0
     print(f'⚠ 命中 {total_hits} 处，涉及 {total_files} 个文件')
     if not a.fix:
-        print('  仅报告未改动。确认语境后加 --fix（ALL 条目）/ --fix --force（全部）自动替换。')
+        print('  仅报告未改动。加 --fix 只替换 ALL 条目；其余条目用 '
+              '--fix --force <错误写法> 点名，或 --fix --force-all 全部替换。')
     return 1
 
 

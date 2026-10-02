@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""错误基线统计：从已核对的误识对照表里，挖 ASR 错误类型分布与分层纠错命中率。
+"""错误基线统计：从归档挖掘 ASR 错误类型分布与分层纠错理论命中率。
 
 只读脚本 —— 读「纪要目录」里的 ASR 误识对照表与「素材包目录」里的转写产物，
 输出统计报告，不改动任何原有文件（除 --out / --json 指定的报告）。
@@ -34,6 +34,28 @@ SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_GLOSSARY = os.path.join(SKILL_DIR, 'references', 'asr_glossary.txt')
 
 SEP = re.compile(r'^\|[\s:|-]+\|$')
+
+
+def read_utf8(path):
+    """读 UTF-8 文本。编码不合法时在 stderr 报出文件名与偏移，并改用替换字符读取。
+
+    返回的文本始终可用，调用方不需要处理异常；非法字节不会被悄悄丢掉。
+    """
+    raw = open(path, 'rb').read()
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError as e:
+        print('[提醒] %s 不是合法的 UTF-8（偏移 %d 起），已用替换字符读取，'
+              '该文件的统计可能不准' % (path, e.start), file=sys.stderr)
+        return raw.decode('utf-8', 'replace')
+
+
+def write_atomic(path, text):
+    """原子写入：先写同目录临时文件再替换，中断不会留下半截报告。"""
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write(text)
+    os.replace(tmp, path)
 LEFT_KEYS = ('原文', 'ASR', '字幕', '转写')
 RIGHT_KEYS = ('应为', '正确', '还原')
 CONF_KEYS = ('置信', '把握')
@@ -120,7 +142,7 @@ def split_cell(cell):
 
 def parse_file(path):
     """返回 (pairs, unresolved_count)。pairs: [(错, 对, 置信, 依据)]"""
-    t = open(path, encoding='utf-8', errors='ignore').read()
+    t = read_utf8(path)
     pairs, unresolved = [], 0
     for ri, ci, rows in iter_tables(t):
         for cells in rows:
@@ -153,16 +175,16 @@ def parse_file(path):
 
 
 def engine_of(text):
-    """判定素材来源：平台自动字幕 / 本地 ASR / 两者混用。"""
+    """判定素材来源：B站 AI 字幕 / 本地 ASR / 两者混用。"""
     has_local = any(k in text for k in ('本地 Whisper', '本地 ASR', 'Whisper large'))
-    has_platform_ai = any(k in text for k in ('AI 生成中文字幕', 'B站 AI', 'B 站 AI',
-                                              '官方 AI 字幕'))
-    if has_local and has_platform_ai:
+    has_bili = any(k in text for k in ('AI 生成中文字幕', 'B站 AI', 'B 站 AI',
+                                       '官方 AI 字幕'))
+    if has_local and has_bili:
         return 'mixed'
     if has_local:
         return 'local-asr'
-    if has_platform_ai:
-        return 'platform-ai'
+    if has_bili:
+        return 'bili-ai'
     return 'unknown'
 
 
@@ -347,7 +369,7 @@ def main():
         return 2
 
     files = [f for f in sorted(glob.glob(os.path.join(a.raw, '*.md')))
-             if '误识对照' in open(f, encoding='utf-8', errors='ignore').read()]
+             if '误识对照' in read_utf8(f)]
     pack_index = {}
     for p in glob.glob(os.path.join(a.subs, '*.md')):
         m = re.search(r'BV[0-9A-Za-z]{10}', os.path.basename(p))
@@ -359,14 +381,14 @@ def main():
 
     rows, unresolved_total, no_pack = [], 0, 0
     for f in files:
-        t = open(f, encoding='utf-8', errors='ignore').read()
+        t = read_utf8(f)
         pairs, unres = parse_file(f)
         unresolved_total += unres
         eng = engine_of(t)
         m = re.search(r'BV[0-9A-Za-z]{10}', t)
         pack = None
         if m and m.group(0) in pack_index:
-            pack = open(pack_index[m.group(0)], encoding='utf-8', errors='ignore').read()
+            pack = read_utf8(pack_index[m.group(0)])
         else:
             no_pack += 1
 
@@ -471,7 +493,7 @@ def main():
                   100.0 * sum(1 for r in rows if r['special']) / n))
     out.append('')
     out.append('-- 按来源引擎 × 音系 --')
-    for eng in ('platform-ai', 'local-asr', 'mixed', 'unknown'):
+    for eng in ('bili-ai', 'local-asr', 'mixed', 'unknown'):
         sub = [r for r in rows if r['engine'] == eng]
         if not sub:
             continue
@@ -506,10 +528,9 @@ def main():
 
     dest = a.out or os.path.join(os.getcwd(),
                                  'baseline_errors_report.txt')
-    open(dest, 'w', encoding='utf-8').write('\n'.join(out))
+    write_atomic(dest, '\n'.join(out))
     if a.json:
-        json.dump(rows, open(a.json, 'w', encoding='utf-8'),
-                  ensure_ascii=False, indent=1)
+        write_atomic(a.json, json.dumps(rows, ensure_ascii=False, indent=1))
     print('错误对 %d 个；报告 -> %s' % (n, dest))
     print('\n'.join(out[:32]))
     return 0

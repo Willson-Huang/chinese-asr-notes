@@ -4,6 +4,8 @@ packs/
 notes/
 transcripts/
 *.log
+# 校验脚本会把详细结果写到当前目录（stdout 只留摘要）
+*_out.txt
 
 # ---- Python ----
 __pycache__/

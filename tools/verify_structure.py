@@ -10,8 +10,10 @@
   python verify_structure.py --dir raw          # 校验整个目录
 
 校验四项:
-  1. frontmatter 存在且含必需字段（title/date/type/source/tags/entities/confidence/review_by）
-  2. tags 6-10 个、entities 8-12 个（模板粒度要求，决定半年后能否搜到）
+  1. frontmatter 存在且含必需字段（title/date/type/source/tags/keywords/entities/
+     confidence/review_by）
+  2. tags 的每一项必须带 src/ topic/ entity/ 前缀（知识库 schema 第 4 节：不带前缀的
+     标签一律无效）；entities 8-12 个（模板粒度要求，决定半年后能否搜到）
   3. 14 节标题齐全（一～十四，按序）
   4. 内容要点以表格为主（模板：能用表格就不用散文）
 
@@ -25,8 +27,29 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
       '十一', '十二', '十三', '十四']
-REQUIRED_FM = ['title', 'date', 'type', 'source', 'tags', 'entities',
+REQUIRED_FM = ['title', 'date', 'type', 'source', 'tags', 'keywords', 'entities',
                'confidence', 'review_by']
+NS = ('src/', 'topic/', 'entity/')
+# 封闭枚举（知识库 schema 第 3 节）；本脚本只处理 _纪要.md，故转写类 4 值为常用项
+TYPE_ENUM = {'转写·访谈', '转写·科普', '转写·评论', '转写·教程', '公众号', '政策原文'}
+
+
+def _yaml_list(block, key):
+    """取 frontmatter 里某个列表字段的条目，返回 (条目列表, 形态)。
+
+    形态 inline  = 写在同一行的 [a, b, c]
+    形态 block   = 另起缩进行，形如 tags: 换行后跟 '  - a'
+    形态 missing = 两种写法都匹配不到。这时必须出声，否则粒度要求会被静默跳过。
+    """
+    m = re.search(rf'^{key}:\s*\[(.*?)\]', block, re.M)
+    if m:
+        return [x.strip() for x in m.group(1).split(',') if x.strip()], 'inline'
+    m = re.search(rf'^{key}:[ \t]*\r?\n((?:[ \t]+-.*\r?\n?)+)', block, re.M)
+    if m:
+        items = [ln.strip()[1:].strip() for ln in m.group(1).splitlines()
+                 if ln.strip().startswith('-')]
+        return [x for x in items if x], 'block'
+    return [], 'missing'
 
 
 def check(path: Path):
@@ -49,17 +72,29 @@ def check(path: Path):
                 if not re.search(rf'^{k}:\s*\S', block, re.M)]
         if miss:
             errors.append(f'frontmatter 缺字段: {", ".join(miss)}')
-        # tags
-        m = re.search(r'^tags:\s*\[(.*?)\]', block, re.M)
-        tags = [x.strip() for x in m.group(1).split(',') if x.strip()] if m else []
-        tags_n = len(tags)
-        if m and not (6 <= tags_n <= 10):
-            warnings.append(f'tags {tags_n} 个（指引 6-10）')
-        # entities
-        m = re.search(r'^entities:\s*\[(.*?)\]', block, re.M)
-        ents = [x.strip() for x in m.group(1).split(',') if x.strip()] if m else []
-        ent_n = len(ents)
-        if m and not (8 <= ent_n <= 12):
+        # type 是封闭枚举：自创值（如旧模板的「播客访谈纪要」）进库即判不合规
+        mt = re.search(r'^type:\s*(\S+)', block, re.M)
+        if mt and mt.group(1) not in TYPE_ENUM:
+            errors.append(f'`type` 不在枚举表内: {mt.group(1)}'
+                          f'（可选值 {" / ".join(sorted(TYPE_ENUM))}）')
+        tags_items, tags_style = _yaml_list(block, 'tags')
+        ent_items, ent_style = _yaml_list(block, 'entities')
+        tags_n, ent_n = len(tags_items), len(ent_items)
+        # tags 改查「带命名空间前缀」而不是个数（2026-09-28）：
+        # 本库 tags 已分层——只放可导航的桶名（src/ topic/ entity/），
+        # 原有具体词全量进 keywords。仍按旧规则要求 6-10 个会逼出无前缀标签，
+        # 而这类标签进库会被 check_frontmatter.py 判为不合规。
+        if tags_style == 'missing':
+            warnings.append('tags 读不出条目（既不是内联数组也不是块状列表），'
+                            '本项无法校验')
+        else:
+            badns = [x for x in tags_items if not x.startswith(NS)]
+            if badns:
+                warnings.append('tags 含无命名空间前缀项: ' + ', '.join(badns[:5]))
+        if ent_style == 'missing':
+            warnings.append('entities 读不出条目（既不是内联数组也不是块状列表），'
+                            '本项无法校验')
+        elif not (8 <= ent_n <= 12):
             warnings.append(f'entities {ent_n} 个（指引 8-12）')
 
     # 3. 14 节
@@ -95,8 +130,6 @@ def main():
     else:
         print('用法: python verify_structure.py <文件...>  |  --dir <目录>')
         sys.exit(2)
-
-    VIDEO_TYPES = ['播客访谈纪要', '知识科普', '评论解说', '教程演示', '圆桌对谈']
 
     bad = warn_n = skip = 0
     rows = []
@@ -143,4 +176,17 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    log_path = Path.cwd() / 'verify_structure_out.txt'
+    real = sys.stdout
+    with open(log_path, 'w', encoding='utf-8') as f:
+        sys.stdout = f
+        try:
+            code = main()
+        except SystemExit as e:
+            code = e.code
+        finally:
+            sys.stdout = real
+    print(f'详细结果写入 {log_path}')
+    for line in log_path.read_text(encoding='utf-8').splitlines()[-6:]:
+        print('  ' + line)
+    sys.exit(code)

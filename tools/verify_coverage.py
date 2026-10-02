@@ -13,6 +13,7 @@
 
 退出码: 0 = 全部通过; 1 = 存在遗失
 """
+import collections
 import re
 import sys
 
@@ -43,15 +44,27 @@ new = read_text(sys.argv[2])
 
 ok = True
 
-# 1. 时间戳
-old_ts = sorted(set(re.findall(r'\d{2}:\d{2}:\d{2}', old)))
-new_ts = set(re.findall(r'\d{2}:\d{2}:\d{2}', new))
+# 1. 时间戳：先看有没有整条缺失，再比每个值的出现次数——
+#    只用集合比较发现不了「漏抄一次」或「重复抄两次」这类变化。
+old_list = re.findall(r'\d{2}:\d{2}:\d{2}', old)
+new_list = re.findall(r'\d{2}:\d{2}:\d{2}', new)
+old_ts = sorted(set(old_list))
+new_ts = set(new_list)
 miss_ts = [t for t in old_ts if t not in new_ts]
-print(f'时间戳: 原 {len(old_ts)} 个 / 缺失 {len(miss_ts)} 个')
+print(f'时间戳: 原 {len(old_ts)} 个不同值 / 共出现 {len(old_list)} 次；'
+      f'新 {len(new_ts)} 个不同值 / 共出现 {len(new_list)} 次；缺失 {len(miss_ts)} 个')
 if miss_ts:
     ok = False
     for t in miss_ts:
         print(f'   缺失 [{t}]')
+old_cnt, new_cnt = collections.Counter(old_list), collections.Counter(new_list)
+fewer = [(t, old_cnt[t], new_cnt[t]) for t in old_cnt if new_cnt[t] < old_cnt[t]]
+if fewer:
+    ok = False
+    for t, a, b in fewer[:20]:
+        print(f'   出现次数变少 [{t}] 原 {a} 次 -> 新 {b} 次')
+    if len(fewer) > 20:
+        print(f'   …另有 {len(fewer) - 20} 个值出现次数变少')
 
 # 2. 章节标题
 old_h = re.findall(r'^#{2,3} .+$', old, re.M)

@@ -55,7 +55,9 @@ DEFAULT_INFER_BATCH = 1
 # 由环境变量 ASR_PROGRESS_DIR（或历史名 BILI_PROGRESS_DIR）启用；未设置时全部为空操作。
 # 任何异常一律吞掉 —— 进度是旁路，绝不能让看板拖垮转写。
 # Nano 一次 generate 处理整条音频、没有细粒度回调，故按
-# 「已用时间 / (音频时长 ÷ 实测倍率 5.08)」插值出百分比。
+# 「已用时间 / (音频时长 ÷ 实测倍率)」插值出百分比。
+# 倍率优先取 observed_rtf()（从已完成任务实测，批量约 2.1x），
+# 样本不足才退回常量 5.08 —— 照常量算会在批量中途直接顶到 97%。
 # --------------------------------------------------------------------------- #
 def _hub():
     if not (os.environ.get('ASR_PROGRESS_DIR') or os.environ.get('BILI_PROGRESS_DIR')):
@@ -99,7 +101,7 @@ class _AsrReporter:
             self.dur = _dur_sec(wav)
             self.t0 = time.time()
             self.h.auto(task=self.task, stage='asr', pct=1.0, duration_sec=self.dur,
-                        started=self.t0, note=(label or '转写中'))
+                        started=self.t0, kind='begin', note=(label or '转写中'))
             self._th = threading.Thread(target=self._loop, daemon=True)
             self._th.start()
         except Exception:
@@ -109,18 +111,31 @@ class _AsrReporter:
         while not self._stop.wait(self.INTERVAL):
             try:
                 el = time.time() - self.t0
-                pct = self.h.pct_from_elapsed(el, self.dur)
+                pct = self.h.pct_from_elapsed(
+                    el, self.dur,
+                    rate=self.h.effective_rtf(d=self.h.progress_dir())[0])
                 self.h.auto(task=self.task, stage='asr', pct=pct, elapsed=round(el, 1),
+                            kind='report',
                             note='转写中 %s%%' % (('%.0f' % pct) if pct is not None else '?'))
             except Exception:
                 pass
 
     def done(self, asr_sec=None, note='转写完成'):
+        """转写结束。
+
+        只发到 transcribed（非终态）——「已完成」要等纪要写完，由主 agent 上报。
+        这里若直接发 done，终态锁会让后到的 notes 事件永远不生效，
+        看板就会在还要生成纪要的时候显示「已完成 / 预计剩余 0s」。
+        """
         try:
             self._stop.set()
             if self.h:
-                self.h.auto(task=self.task, stage='done', pct=100.0,
-                            elapsed=round(asr_sec, 1) if asr_sec else None, note=note)
+                # duration_sec 必须带上：观察倍率就是从这个事件的
+                # 「音频时长 ÷ 实际耗时」取的，缺了它样本永远为 0
+                self.h.auto(task=self.task, stage='transcribed', pct=100.0,
+                            duration_sec=self.dur, kind='end',
+                            elapsed=round(asr_sec, 1) if asr_sec else None,
+                            note=note + '，待生成纪要')
         except Exception:
             pass
 
@@ -305,7 +320,9 @@ def main():
 
         t1 = time.time()
         # 统一按批量处理（单条视为 1 条批量）：一次加载模型，逐条 generate
-        items = ([{'key': 'single', 'audio': a.audio}] if a.audio
+        # 单条模式的 key 取音频路径：文件名里带 BV 号，task_of() 会把它取出来。
+        # 写死成占位名会让进度落到一个无名任务下，与 run.json 登记的 BV 行对不上号。
+        items = ([{'key': a.audio, 'audio': a.audio}] if a.audio
                  else json.loads(Path(a.batch_json).read_text(encoding='utf-8')))
         per_item = []
         for it in items:
